@@ -48,7 +48,7 @@ export interface UnknownMedia{
     contentType: string,
     contentUrl: string,
     name?: string,
-    thumbnailUrl?: string    
+    thumbnailUrl?: string
 }
 
 export type CardActionTypes = "openUrl" | "imBack" | "postBack" | "playAudio" | "playVideo" | "showImage" | "downloadFile" | "signin" | "call";
@@ -263,12 +263,16 @@ export interface DirectLineOptions {
     webSocket?: boolean,
     pollingInterval?: number,
     streamUrl?: string
+    isTest?: boolean
 }
 
 const lifetimeRefreshToken = 30 * 60 * 1000;
 const intervalRefreshToken = lifetimeRefreshToken / 2;
 const timeout = 20 * 1000;
 const retries = (lifetimeRefreshToken - intervalRefreshToken) / timeout;
+
+var connectionRetryTimeout = 4000;
+var retryConnection = 4;
 
 const errorExpiredToken = new Error("expired token");
 const errorConversationEnded = new Error("conversation ended");
@@ -303,6 +307,7 @@ export class DirectLine implements IBotConnection {
     private watermark = '';
     private streamUrl: string;
     public referenceGrammarId: string;
+    public isTest : boolean;
 
     private pollingInterval: number = 1000;
 
@@ -310,8 +315,9 @@ export class DirectLine implements IBotConnection {
 
     constructor(options: DirectLineOptions) {
         this.secret = options.secret;
+        this.isTest = options.isTest;
         this.token = options.secret || options.token;
-        this.webSocket = (options.webSocket === undefined ? true : options.webSocket) && typeof WebSocket !== 'undefined' && WebSocket !== undefined; 
+        this.webSocket = (options.webSocket === undefined ? true : options.webSocket) && typeof WebSocket !== 'undefined' && WebSocket !== undefined;
 
         if (options.domain)
             this.domain = options.domain;
@@ -319,13 +325,13 @@ export class DirectLine implements IBotConnection {
             this.conversationId = options.conversationId;
         }
         if (options.watermark) {
-            if (this.webSocket) 
+            if (this.webSocket)
                 console.warn("Watermark was ignored: it is not supported using websockets at the moment");
             else
                 this.watermark =  options.watermark;
         }
         if (options.streamUrl) {
-            if (options.token && options.conversationId) 
+            if (options.token && options.conversationId)
                 this.streamUrl = options.streamUrl;
             else
                 console.warn("streamUrl was ignored: you need to provide a token and a conversationid");
@@ -368,11 +374,12 @@ export class DirectLine implements IBotConnection {
                 }
             }
             else {
-                return Observable.of(connectionStatus);            
+                return Observable.of(connectionStatus);
             }
         })
         .filter(connectionStatus => connectionStatus != ConnectionStatus.Uninitialized && connectionStatus != ConnectionStatus.Connecting)
         .flatMap(connectionStatus => {
+            //console.log("aqui no connection status")
             switch (connectionStatus) {
                 case ConnectionStatus.Ended:
                     return Observable.throw(errorConversationEnded);
@@ -384,6 +391,7 @@ export class DirectLine implements IBotConnection {
                     return Observable.throw(errorExpiredToken);
 
                 default:
+                  //  console.log("cai aqui no observable of null")
                     return Observable.of(null);
             }
         })
@@ -399,9 +407,12 @@ export class DirectLine implements IBotConnection {
 
     private startConversation() {
         //if conversationid is set here, it means we need to call the reconnect api, else it is a new conversation
-        const url = this.conversationId 
-            ? `${this.domain}/conversations/${this.conversationId}?watermark=${this.watermark}` 
-            : `${this.domain}/conversations`;
+
+
+
+        const url = this.conversationId
+            ? `${this.domain}/conversations/${this.conversationId}?watermark=${this.watermark}&isTest=${this.isTest}`
+            : `${this.domain}/conversations?isTest=${this.isTest}`;
         const method = this.conversationId ? "GET" : "POST";
 
         return Observable.ajax({
@@ -418,12 +429,13 @@ export class DirectLine implements IBotConnection {
         .retryWhen(error$ =>
             // for now we deem 4xx and 5xx errors as unrecoverable
             // for everything else (timeouts), retry for a while
+
             error$.mergeMap(error => error.status >= 400 && error.status < 600
                 ? Observable.throw(error)
                 : Observable.of(error)
             )
-            .delay(timeout)
-            .take(retries)
+            .delay(connectionRetryTimeout)
+            .take(retryConnection)
         )
     }
 
@@ -475,7 +487,7 @@ export class DirectLine implements IBotConnection {
             this.tokenRefreshSubscription.unsubscribe();
         this.connectionStatus$.next(ConnectionStatus.Ended);
     }
-    
+
     getSessionId(): Observable<string> {
         // If we're not connected to the bot, get connected
         // Will throw an error if we are not connected
@@ -484,7 +496,7 @@ export class DirectLine implements IBotConnection {
             .flatMap(_ =>
                 Observable.ajax({
                     method: "GET",
-                    url: `${this.domain}/session/getsessionid`, 
+                    url: `${this.domain}/session/getsessionid`,
                     withCredentials: true,
                     timeout,
                     headers: {
@@ -574,7 +586,7 @@ export class DirectLine implements IBotConnection {
         if (error.status === 403)
             // token has expired (will fall through to return "retry")
             this.expiredToken();
-        else if (error.status >= 400 && error.status < 500)
+        else if (error.status >= 400 && error.status < 600)
             // more unrecoverable errors
             return Observable.throw(error);
         return Observable.of("retry");
