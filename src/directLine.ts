@@ -527,7 +527,7 @@ export class DirectLine implements IBotConnection {
         .flatMap(_ =>
             Observable.ajax({
                 method: "POST",
-                url: `${this.domain}/conversations/${this.conversationId}/activities`,
+                url: `${this.domain}/conversations/${this.conversationId}/activities&isTest=${this.isTest}`,
                 body: activity,
                 timeout,
                 headers: {

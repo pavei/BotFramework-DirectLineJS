@@ -258,7 +258,7 @@ var DirectLine = /** @class */ (function () {
             .flatMap(function (_) {
             return Observable_1.Observable.ajax({
                 method: "POST",
-                url: _this.domain + "/conversations/" + _this.conversationId + "/activities",
+                url: _this.domain + "/conversations/" + _this.conversationId + "/activities&isTest=" + _this.isTest,
                 body: activity,
                 timeout: timeout,
                 headers: {
